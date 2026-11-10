@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, MessageCircle, Search, Send } from "lucide-react";
+import { ArrowLeft, Lock, MessageCircle, Plus, Search, Send, X } from "lucide-react";
 import { PageHeader } from "@/components/espace/EspaceShell";
 import { Alert, AnimalThumb, Avatar, Card, cn, EmptyState, PageLoader, Spinner, useToast } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { unwrap, useQuery } from "@/hooks/useQuery";
 import { emitUnreadChange } from "@/hooks/useUnread";
-import { formatDate, formatTime, timeAgo } from "@/lib/labels";
+import { listContacts, startConversation, type Contact } from "@/lib/contacts";
+import { formatDate, formatTime, ROLE_LABEL, timeAgo } from "@/lib/labels";
 import { errorMessage, getSupabase } from "@/lib/supabase";
 import type { Conversation, Message } from "@/lib/types";
 
@@ -17,7 +18,7 @@ const CONV_SELECT =
   "*, animal:animals!conversations_animal_id_fkey(id,name,cover_url), a:profiles!conversations_participant_a_fkey(*), b:profiles!conversations_participant_b_fkey(*)";
 
 export function MessagesView() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const uid = user?.id;
   const sp = useSearchParams();
   const router = useRouter();
@@ -27,6 +28,8 @@ export function MessagesView() {
   const [filter, setFilter] = useState("");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [starting, setStarting] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<string | null>(selected);
 
@@ -62,6 +65,9 @@ export function MessagesView() {
     [selected, uid],
     !!uid,
   );
+
+  // Contacts autorisés : équipe Bakma + vétérinaires attribués à mes animaux (jamais un autre client).
+  const contacts = useQuery(listContacts, [uid], !!uid);
 
   const { setData: setConvs, reload: reloadConvs } = convs;
   const { setData: setThread } = thread;
@@ -129,6 +135,24 @@ export function MessagesView() {
     : list;
   const current = list.find((c) => c.id === selected) ?? null;
   const select = (id: string | null) => router.replace(id ? `${pathname}?c=${id}` : pathname, { scroll: false });
+  // Anciennes conversations avec un contact non autorisé (ex. client ↔ client) : lecture seule.
+  const allowedIds = new Set((contacts.data ?? []).map((c) => c.id));
+  const canWrite = (c: Conversation) => profile?.role === "admin" || !contacts.data || allowedIds.has(other(c)?.id ?? "");
+
+  async function startWith(c: Contact) {
+    const key = `${c.id}-${c.animal_id ?? ""}`;
+    setStarting(key);
+    try {
+      const id = await startConversation(c.id, c.animal_id);
+      setPicking(false);
+      reloadConvs();
+      select(id);
+    } catch (err) {
+      toast(errorMessage(err), "error");
+    } finally {
+      setStarting(null);
+    }
+  }
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -161,15 +185,22 @@ export function MessagesView() {
   return (
     <div>
       <div className={cn(selected && "hidden lg:block")}>
-        <PageHeader title="Messages" subtitle="Échangez en toute sécurité avec les propriétaires et les adoptants." />
+        <PageHeader title="Messages" subtitle="Échangez avec l'équipe Bakma et les vétérinaires qui suivent vos animaux." />
       </div>
       {convs.error && <Alert>{convs.error}</Alert>}
 
-      <Card className="grid h-[calc(100vh-15rem)] min-h-[480px] overflow-hidden lg:grid-cols-[320px_1fr]">
+      <Card
+        className={cn(
+          "grid h-[calc(100dvh-15rem)] min-h-[480px] overflow-hidden lg:grid-cols-[320px_1fr]",
+          // Mobile, conversation ouverte : plein écran entre l'en-tête (72px) et la barre d'onglets (68px).
+          selected &&
+            "max-lg:fixed max-lg:inset-x-0 max-lg:top-[72px] max-lg:bottom-[calc(68px+env(safe-area-inset-bottom))] max-lg:z-30 max-lg:h-auto max-lg:min-h-0 max-lg:rounded-none max-lg:border-x-0 max-lg:shadow-none",
+        )}
+      >
         {/* Liste */}
         <div className={cn("flex min-h-0 flex-col border-line lg:border-r", selected && "hidden lg:flex")}>
-          <div className="border-b border-line p-3">
-            <div className="relative">
+          <div className="flex items-center gap-2 border-b border-line p-3">
+            <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
               <input
                 value={filter}
@@ -178,11 +209,22 @@ export function MessagesView() {
                 className="h-10 w-full rounded-full border border-line bg-page/50 pl-9 pr-3 text-sm outline-none focus:border-primary"
               />
             </div>
+            <button
+              onClick={() => setPicking((v) => !v)}
+              className={cn("grid size-10 shrink-0 place-items-center rounded-full", picking ? "bg-page text-navy" : "bg-gradient-to-b from-primary to-primary-dark text-white")}
+              aria-label={picking ? "Fermer" : "Nouveau message"}
+              title={picking ? "Fermer" : "Nouveau message"}
+            >
+              {picking ? <X className="size-5" /> : <Plus className="size-5" />}
+            </button>
           </div>
+          {picking ? (
+            <ContactPicker contacts={contacts.data} loading={contacts.loading} error={contacts.error} starting={starting} onPick={startWith} />
+          ) : (
           <ul className="min-h-0 flex-1 overflow-y-auto">
             {visible.length === 0 && (
               <li>
-                <EmptyState icon={<MessageCircle />} title="Aucune conversation" text="Contactez un propriétaire depuis une annonce pour démarrer une discussion." />
+                <EmptyState icon={<MessageCircle />} title="Aucune conversation" text="Appuyez sur « + » pour écrire à l'équipe Bakma ou au vétérinaire de votre animal." />
               </li>
             )}
             {visible.map((c) => {
@@ -214,6 +256,7 @@ export function MessagesView() {
               );
             })}
           </ul>
+          )}
         </div>
 
         {/* Fil */}
@@ -277,6 +320,12 @@ export function MessagesView() {
                 )}
                 <div ref={bottom} />
               </div>
+              {!canWrite(current) ? (
+                <p className="flex items-center gap-2 border-t border-line bg-page/60 px-4 py-3 text-sm text-muted">
+                  <Lock className="size-4 shrink-0" />
+                  Conversation archivée : les échanges directs entre clients ne sont plus possibles. Contactez l&apos;équipe Bakma.
+                </p>
+              ) : (
               <form onSubmit={send} className="flex items-end gap-2 border-t border-line p-3">
                 <textarea
                   value={draft}
@@ -301,10 +350,75 @@ export function MessagesView() {
                   {sending ? <Spinner className="size-5 text-white" /> : <Send className="size-5" />}
                 </button>
               </form>
+              )}
             </>
           )}
         </div>
       </Card>
+    </div>
+  );
+}
+
+/** Choix d'un destinataire : uniquement les contacts autorisés (équipe Bakma, vétérinaires de mes animaux). */
+function ContactPicker({
+  contacts,
+  loading,
+  error,
+  starting,
+  onPick,
+}: {
+  contacts: Contact[] | null | undefined;
+  loading: boolean;
+  error: string | null | undefined;
+  starting: string | null;
+  onPick: (c: Contact) => void;
+}) {
+  if (loading && !contacts) {
+    return (
+      <div className="grid flex-1 place-items-center">
+        <Spinner />
+      </div>
+    );
+  }
+  const admins = (contacts ?? []).filter((c) => c.role === "admin");
+  const others = (contacts ?? []).filter((c) => c.role !== "admin");
+  const row = (key: string, name: string, sub: string, avatar: string | null, onClick: () => void) => (
+    <li key={key}>
+      <button onClick={onClick} disabled={!!starting} className="flex w-full items-center gap-3 border-b border-line/60 px-4 py-3 text-left transition hover:bg-page disabled:opacity-60">
+        <Avatar src={avatar} name={name} size={42} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold text-navy">{name}</p>
+          <p className="truncate text-xs text-muted">{sub}</p>
+        </div>
+        {starting === key && <Spinner className="size-4" />}
+      </button>
+    </li>
+  );
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      {error && <Alert>{error}</Alert>}
+      <p className="px-4 pb-1 pt-3 text-[11px] font-bold uppercase tracking-wide text-muted">Équipe Bakma</p>
+      {admins.length === 0 ? (
+        <p className="px-4 py-2 text-xs text-muted">Le support est momentanément indisponible.</p>
+      ) : (
+        <ul>{admins.map((c) => row(`${c.id}-`, c.full_name || "Équipe Bakma", "Administrateur Bakma", c.avatar_url, () => onPick(c)))}</ul>
+      )}
+      <p className="px-4 pb-1 pt-4 text-[11px] font-bold uppercase tracking-wide text-muted">Vétérinaires de vos animaux</p>
+      {others.length === 0 ? (
+        <p className="px-4 py-2 text-xs text-muted">Aucun vétérinaire n&apos;est encore attribué à vos animaux.</p>
+      ) : (
+        <ul>
+          {others.map((c) =>
+            row(
+              `${c.id}-${c.animal_id ?? ""}`,
+              c.full_name || ROLE_LABEL[c.role],
+              [ROLE_LABEL[c.role], c.animal_name].filter(Boolean).join(" · "),
+              c.avatar_url,
+              () => onPick(c),
+            ),
+          )}
+        </ul>
+      )}
     </div>
   );
 }

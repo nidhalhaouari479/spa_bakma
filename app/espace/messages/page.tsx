@@ -1,13 +1,4 @@
-"use client";
+// Espace client protégé côté client (EspaceShell) : la page n'est jamais rendue au prérendu.
+export const instant = false;
 
-import { Suspense } from "react";
-import { PageLoader } from "@/components/ui";
-import { MessagesView } from "./MessagesView";
-
-export default function MessagesPage() {
-  return (
-    <Suspense fallback={<PageLoader />}>
-      <MessagesView />
-    </Suspense>
-  );
-}
+export { default } from "./View";

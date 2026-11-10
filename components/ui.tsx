@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Loader2, PawPrint, X } from "lucide-react";
+import { Children, createContext, isValidElement, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Loader2, PawPrint, X } from "lucide-react";
 import { initials, type Tone } from "@/lib/labels";
 
 export function cn(...c: (string | false | null | undefined)[]) {
@@ -79,13 +79,213 @@ export function Textarea({ className, ...rest }: React.TextareaHTMLAttributes<HT
   return <textarea className={cn(inputBase, "min-h-28 px-4 py-3", className)} {...rest} />;
 }
 
-export function Select({ icon, className, children, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & { icon?: React.ReactNode }) {
+type SelectOption = { value: string; label: React.ReactNode; text: string; disabled?: boolean };
+
+/** Récupère les <option> passées en enfants (y compris dans des fragments / tableaux). */
+function readOptions(children: React.ReactNode): SelectOption[] {
+  const out: SelectOption[] = [];
+  const walk = (nodes: React.ReactNode) =>
+    Children.forEach(nodes, (child) => {
+      if (!isValidElement(child)) return;
+      const props = child.props as { value?: string | number; children?: React.ReactNode; disabled?: boolean };
+      if (child.type === "option") {
+        const text = Children.toArray(props.children)
+          .filter((c) => typeof c === "string" || typeof c === "number")
+          .join("");
+        out.push({ value: String(props.value ?? text), label: props.children, text, disabled: props.disabled });
+      } else if (props.children) walk(props.children);
+    });
+  walk(children);
+  return out;
+}
+
+/**
+ * Liste déroulante stylée (remplace le <select> natif, dont le menu est dessiné par le système).
+ * Même API qu'un <select> : value, onChange(e) avec e.target.value, enfants <option>.
+ */
+export function Select({
+  icon,
+  className,
+  children,
+  value,
+  onChange,
+  disabled,
+  name,
+  id,
+  "aria-label": ariaLabel,
+}: React.SelectHTMLAttributes<HTMLSelectElement> & { icon?: React.ReactNode }) {
+  const options = readOptions(children);
+  const current = String(value ?? "");
+  const selected = options.find((o) => o.value === current) ?? options[0];
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const listId = useId();
+
+  const place = useCallback(() => {
+    const r = btn.current?.getBoundingClientRect();
+    if (!r) return;
+    const below = window.innerHeight - r.bottom - 12;
+    const above = r.top - 12;
+    const up = below < 220 && above > below;
+    // Largeur mini 180 px, sans jamais dépasser l'écran : on aligne sur le bord droit du champ si besoin.
+    const vw = document.documentElement.clientWidth;
+    const width = Math.min(Math.max(r.width, 180), vw - 16);
+    let left = r.left;
+    if (left + width > vw - 8) left = r.right - width; // déborde à droite → aligné sur le bord droit du champ
+    left = Math.min(Math.max(8, left), vw - 8 - width);
+    setPos({
+      left,
+      width,
+      maxHeight: Math.min(288, up ? above : below),
+      ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }),
+    });
+  }, []);
+
+  function openList() {
+    if (disabled) return;
+    place();
+    setActive(Math.max(0, options.findIndex((o) => o.value === selected?.value)));
+    setOpen(true);
+  }
+
+  function choose(o: SelectOption | undefined) {
+    if (!o || o.disabled) return;
+    setOpen(false);
+    btn.current?.focus();
+    if (o.value !== current) {
+      onChange?.({ target: { value: o.value, name }, currentTarget: { value: o.value, name } } as unknown as React.ChangeEvent<HTMLSelectElement>);
+    }
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!btn.current?.contains(e.target as Node) && !list.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onScroll = (e: Event) => {
+      if (!list.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", place);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, place]);
+
+  // Garder l'option active visible
+  useEffect(() => {
+    if (open) list.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [open, active]);
+
+  function move(d: number) {
+    let i = active;
+    for (let k = 0; k < options.length; k++) {
+      i = (i + d + options.length) % options.length;
+      if (!options[i]?.disabled) break;
+    }
+    setActive(i);
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (!open) {
+      if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) {
+        e.preventDefault();
+        openList();
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      move(1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      move(-1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActive(options.length - 1);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      choose(options[active]);
+    } else if (e.key === "Escape" || e.key === "Tab") {
+      setOpen(false);
+    } else if (e.key.length === 1) {
+      const i = options.findIndex((o) => o.text.toLowerCase().startsWith(e.key.toLowerCase()));
+      if (i >= 0) setActive(i);
+    }
+  }
+
+  const rounded = className?.includes("rounded-") ? "" : "rounded-[var(--radius-input)]";
+
   return (
     <div className="relative">
-      {icon && <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted [&>svg]:size-[18px]">{icon}</span>}
-      <select className={cn(inputBase, "h-12 appearance-none bg-[length:16px] bg-[right_14px_center] bg-no-repeat pr-10", icon ? "pl-11" : "pl-4", "select-chevron", className)} {...rest}>
-        {children}
-      </select>
+      {icon && <span className="pointer-events-none absolute left-3.5 top-1/2 z-[1] -translate-y-1/2 text-muted [&>svg]:size-[18px]">{icon}</span>}
+      <button
+        ref={btn}
+        id={id}
+        type="button"
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        onClick={() => (open ? setOpen(false) : openList())}
+        onKeyDown={onKeyDown}
+        className={cn(
+          "flex h-12 w-full items-center gap-2 border border-line bg-white text-left text-sm text-navy outline-none transition focus-visible:border-primary focus-visible:ring-4 focus-visible:ring-primary/10 disabled:cursor-not-allowed disabled:bg-page",
+          open && "border-primary ring-4 ring-primary/10",
+          rounded,
+          icon ? "pl-11" : "pl-4",
+          "pr-3",
+          className,
+        )}
+      >
+        <span className="min-w-0 flex-1 truncate">{selected?.label}</span>
+        <ChevronDown className={cn("size-4 shrink-0 text-muted transition", open && "rotate-180 text-primary")} aria-hidden />
+      </button>
+      {name && <input type="hidden" name={name} value={current} />}
+      {open && pos && (
+        <ul
+          ref={list}
+          id={listId}
+          role="listbox"
+          aria-label={ariaLabel}
+          className="fixed z-[70] overflow-y-auto rounded-2xl border border-line bg-white p-1.5 shadow-[0_16px_40px_rgba(15,40,90,0.16)]"
+          style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight }}
+        >
+          {options.map((o, i) => {
+            const on = o.value === selected?.value;
+            return (
+              <li
+                key={`${o.value}-${i}`}
+                data-index={i}
+                role="option"
+                aria-selected={on}
+                aria-disabled={o.disabled || undefined}
+                onMouseEnter={() => setActive(i)}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => choose(o)}
+                className={cn(
+                  "flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-sm transition",
+                  o.disabled ? "cursor-not-allowed opacity-40" : i === active ? "bg-page text-navy" : "text-body",
+                  on && "font-bold text-primary",
+                )}
+              >
+                <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                {on && <Check className="size-4 shrink-0 text-primary" aria-hidden />}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

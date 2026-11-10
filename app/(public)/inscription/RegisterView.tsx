@@ -1,13 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { ArrowRight, Heart, MailCheck, MapPin, PawPrint, Phone, ShieldCheck, User, Mail } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft, ArrowRight, Heart, MailCheck, MapPin, PawPrint, Phone, ShieldCheck, User, Mail } from "lucide-react";
 import { AuthLayout } from "@/components/site/AuthLayout";
 import { OAuthButtons, OrDivider, PasswordInput } from "@/components/site/AuthBits";
 import { Alert, Button, cn, Input, Select } from "@/components/ui";
 import { useCities } from "@/hooks/useRefData";
-import { SITE_URL } from "@/lib/catalog";
 import { errorMessage, getSupabase } from "@/lib/supabase";
 
 export function RegisterView() {
@@ -17,7 +16,17 @@ export function RegisterView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [done, setDone] = useState<{ hasSession: boolean } | null>(null);
+  const [step, setStep] = useState<"form" | "code" | "done">("form");
+  const [code, setCode] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+  const [info, setInfo] = useState<string | null>(null);
+
+  // compte à rebours avant de pouvoir renvoyer un code
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -33,26 +42,70 @@ export function RegisterView() {
     return Object.keys(errs).length === 0;
   }
 
+  async function post(url: string, body: unknown) {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const json = (await res.json().catch(() => ({}))) as { error?: string; cooldown_s?: number };
+    if (!res.ok) throw new Error(json.error || "Une erreur est survenue, réessayez.");
+    return json;
+  }
+
+  /** Étape 1 : envoi du code par e-mail */
+  async function sendCode() {
+    const json = await post("/api/auth/inscription/code", { email: form.email.trim(), full_name: form.full_name.trim() });
+    setCooldown(json.cooldown_s ?? 60);
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (!validate()) return;
     setBusy(true);
     try {
-      const { data, error: err } = await getSupabase().auth.signUp({
+      await sendCode();
+      setCode("");
+      setInfo(null);
+      setStep("code");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resend() {
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    try {
+      await sendCode();
+      setCode("");
+      setInfo("Un nouveau code vient de vous être envoyé.");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Étape 2 : vérification du code, création du compte puis connexion */
+  async function verify(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setInfo(null);
+    if (code.length !== 6) return setError("Saisissez le code à 6 chiffres reçu par e-mail.");
+    setBusy(true);
+    try {
+      await post("/api/auth/inscription", {
         email: form.email.trim(),
+        code,
         password: form.password,
-        options: {
-          data: {
-            full_name: form.full_name.trim(),
-            phone: form.phone.trim() || null,
-            city: form.city || null,
-          },
-          emailRedirectTo: `${SITE_URL}/connexion`,
-        },
+        full_name: form.full_name.trim(),
+        phone: form.phone.trim() || null,
+        city: form.city || null,
       });
+      const { error: err } = await getSupabase().auth.signInWithPassword({ email: form.email.trim(), password: form.password });
       if (err) throw err;
-      setDone({ hasSession: !!data.session });
+      setStep("done");
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -87,38 +140,79 @@ export function RegisterView() {
     </>
   );
 
-  if (done) {
+  if (step === "done") {
     return (
       <AuthLayout hero={hero} trust={false}>
         <div className="py-4 text-center">
           <span className="mx-auto grid size-20 place-items-center rounded-full bg-emerald-50 text-emerald-600">
             <MailCheck className="size-10" />
           </span>
-          <h2 className="mt-5 text-2xl font-extrabold sm:text-3xl">{done.hasSession ? "Compte créé !" : "Vérifiez votre e-mail"}</h2>
-          <p className="mx-auto mt-3 max-w-md text-body">
-            {done.hasSession ? (
-              "Votre compte Bakma Store est prêt."
-            ) : (
-              <>
-                Un lien de confirmation a été envoyé à <strong className="text-navy">{form.email.trim()}</strong>. Cliquez dessus pour activer votre compte.
-              </>
-            )}
-          </p>
+          <h2 className="mt-5 text-2xl font-extrabold sm:text-3xl">Compte créé !</h2>
+          <p className="mx-auto mt-3 max-w-md text-body">Votre adresse e-mail est vérifiée et votre compte Bakma Store est prêt.</p>
           <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
-            {done.hasSession ? (
-              <Button href="/espace" size="lg" icon={<ArrowRight className="size-5" />}>
-                Accéder à mon espace
-              </Button>
-            ) : (
-              <Button href="/connexion" size="lg">
-                Se connecter
-              </Button>
-            )}
+            <Button href="/espace" size="lg" icon={<ArrowRight className="size-5" />}>
+              Accéder à mon espace
+            </Button>
             <Button href="/animaux" variant="outline" size="lg">
               Découvrir les animaux
             </Button>
           </div>
         </div>
+      </AuthLayout>
+    );
+  }
+
+  if (step === "code") {
+    return (
+      <AuthLayout hero={hero} trust={false}>
+        <button
+          type="button"
+          onClick={() => {
+            setStep("form");
+            setError(null);
+            setInfo(null);
+          }}
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
+        >
+          <ArrowLeft className="size-4" /> Modifier mes informations
+        </button>
+        <span className="mt-5 grid size-16 place-items-center rounded-full bg-primary-soft text-primary">
+          <MailCheck className="size-8" />
+        </span>
+        <h2 className="mt-4 text-3xl font-extrabold sm:text-[2.1rem]">Vérifiez votre e-mail</h2>
+        <p className="mt-1.5 text-body">
+          Nous avons envoyé un code à 6 chiffres à <strong className="break-all text-navy">{form.email.trim()}</strong>. Il est valable 10 minutes.
+        </p>
+
+        <form onSubmit={verify} className="mt-6 space-y-4" noValidate>
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            autoFocus
+            maxLength={6}
+            placeholder="••••••"
+            aria-label="Code de vérification"
+            className="h-16 w-full rounded-2xl border border-line bg-white text-center text-3xl font-extrabold tracking-[0.5em] text-navy outline-none placeholder:text-line focus:border-primary focus:ring-4 focus:ring-primary/10"
+          />
+          <Alert>{error}</Alert>
+          {info && <Alert tone="green">{info}</Alert>}
+          <Button type="submit" size="lg" className="h-14 w-full text-base" loading={busy} disabled={code.length !== 6}>
+            Vérifier et créer mon compte
+          </Button>
+        </form>
+        <p className="mt-5 text-center text-sm text-body">
+          Vous n&apos;avez rien reçu ? Vérifiez vos spams, ou{" "}
+          {cooldown > 0 ? (
+            <span className="font-semibold text-muted">renvoyez un code dans {cooldown} s</span>
+          ) : (
+            <button type="button" onClick={resend} disabled={busy} className="font-bold text-primary hover:underline disabled:opacity-50">
+              renvoyez un code
+            </button>
+          )}
+          .
+        </p>
       </AuthLayout>
     );
   }

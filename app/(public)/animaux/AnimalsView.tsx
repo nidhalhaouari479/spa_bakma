@@ -10,7 +10,7 @@ import { SearchBar } from "@/components/site/SearchBar";
 import { Alert, Button, Card, Checkbox, cn, EmptyState, Pagination, Select } from "@/components/ui";
 import { useQuery } from "@/hooks/useQuery";
 import { useCategories, useCities } from "@/hooks/useRefData";
-import { AGE_FILTERS, ageFilterExpression, ANIMAL_CARD, cleanSearch, PAGE_SIZE, SORTS, type AgeFilter, type SortValue } from "@/lib/catalog";
+import { AGE_FILTERS, ANIMAL_CARD, PAGE_SIZE, SORTS, VISIBLE_STATUSES, ageFilterExpression, cleanSearch, type AgeFilter, type SortValue } from "@/lib/catalog";
 import { getSupabase } from "@/lib/supabase";
 import type { Animal, ListingType } from "@/lib/types";
 
@@ -79,7 +79,8 @@ export function AnimalsView() {
   const results = useQuery(
     async () => {
       const supabase = getSupabase();
-      let qb = supabase.from("animals").select(ANIMAL_CARD, { count: "exact" }).eq("status", "publiee");
+      // Les animaux vendus restent affichés (bouton « Vendu »), après les annonces disponibles.
+      let qb = supabase.from("animals").select(ANIMAL_CARD, { count: "exact" }).in("status", VISIBLE_STATUSES);
       const term = cleanSearch(filters.q);
       if (term) qb = qb.or(`name.ilike.%${term}%,breed.ilike.%${term}%,short_description.ilike.%${term}%`);
       if (filters.ville) qb = qb.eq("city", filters.ville);
@@ -92,6 +93,7 @@ export function AnimalsView() {
       if (filters.sexe) qb = qb.eq("sex", filters.sexe);
       if (filters.prixMin != null) qb = qb.gte("price", filters.prixMin);
       if (filters.prixMax != null) qb = qb.lte("price", filters.prixMax);
+      qb = qb.order("status", { ascending: true }); // publiee avant vendue (ordre de l'enum)
       if (filters.sort === "prix_asc") qb = qb.order("price", { ascending: true });
       else if (filters.sort === "prix_desc") qb = qb.order("price", { ascending: false });
       else if (filters.sort === "populaire") qb = qb.order("views_count", { ascending: false });
@@ -181,7 +183,7 @@ export function AnimalsView() {
         <div className="min-w-0">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-extrabold sm:text-lg">
-              {results.loading && !results.data ? "Recherche…" : `${count} animal${count > 1 ? "aux" : ""} trouvé${count > 1 ? "s" : ""}`}
+              {results.loading && !results.data ? "Recherche…" : `${count} ${count > 1 ? "animaux trouvés" : "animal trouvé"}`}
             </h2>
             <div className="flex items-center gap-2">
               <button

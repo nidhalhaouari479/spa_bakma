@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { MapPin, Search, SlidersHorizontal } from "lucide-react";
-import { Button, cn } from "@/components/ui";
+import { Button, cn, Select } from "@/components/ui";
 import { useCities } from "@/hooks/useRefData";
 
 /** Barre de recherche « texte + ville + Rechercher » (accueil et liste). */
@@ -47,13 +47,13 @@ export function SearchBar({
         />
       </label>
       <div className="flex gap-2.5">
-        <label className="relative flex-1">
-          <span className="sr-only">Ville</span>
-          <MapPin className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-navy" />
-          <select
+        <div className="relative flex-1">
+          <Select
+            icon={<MapPin className="text-navy" />}
+            aria-label="Ville"
             value={city}
             onChange={(e) => setCity(e.target.value)}
-            className="select-chevron h-12 w-full appearance-none rounded-full border border-line bg-white bg-[length:16px] bg-[right_16px_center] bg-no-repeat pl-12 pr-10 text-sm text-navy outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 md:border-transparent md:bg-page/40"
+            className="rounded-full md:border-transparent md:bg-page/40"
           >
             <option value="">Toutes les villes</option>
             {cities.map((c) => (
@@ -61,8 +61,8 @@ export function SearchBar({
                 {c.name}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </div>
         {onOpenFilters && (
           <button
             type="button"

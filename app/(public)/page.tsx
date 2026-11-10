@@ -3,18 +3,21 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowRight, CheckCircle2, PawPrint } from "lucide-react";
+import { ArrowRight, CheckCircle2, PawPrint, ShoppingBag, Store, Truck } from "lucide-react";
 import { AnimalCard, AnimalCardSkeleton } from "@/components/site/AnimalCard";
 import { CategoryBubble } from "@/components/site/CategoryIcon";
 import { HeroArt } from "@/components/site/HeroArt";
 import { SearchBar } from "@/components/site/SearchBar";
+import { PRODUCT_CARD, ProductCard, ProductCardSkeleton } from "@/components/shop/ShopBits";
+import { useShopSettings } from "@/hooks/useCart";
+import { formatTND } from "@/lib/labels";
 import { Alert, Button, cn, EmptyState } from "@/components/ui";
 import { unwrap, useQuery } from "@/hooks/useQuery";
 import { useCategories } from "@/hooks/useRefData";
-import { ANIMAL_CARD } from "@/lib/catalog";
+import { ANIMAL_CARD, VISIBLE_STATUSES } from "@/lib/catalog";
 import { GUARANTEES, HOW_STEPS } from "@/lib/content";
 import { getSupabase } from "@/lib/supabase";
-import type { Animal } from "@/lib/types";
+import type { Animal, Product } from "@/lib/types";
 
 export default function HomePage() {
   const router = useRouter();
@@ -22,9 +25,10 @@ export default function HomePage() {
   const [chip, setChip] = useState<number | "all">("all");
 
   const recent = useQuery(async () => {
-    let q = getSupabase().from("animals").select(ANIMAL_CARD).eq("status", "publiee");
+    // Les animaux vendus restent affichés (badge « Vendu »), après les annonces disponibles.
+    let q = getSupabase().from("animals").select(ANIMAL_CARD).in("status", VISIBLE_STATUSES);
     if (chip !== "all") q = q.eq("category_id", chip);
-    return unwrap<Animal[]>(await q.order("published_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).limit(10));
+    return unwrap<Animal[]>(await q.order("status", { ascending: true }).order("published_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).limit(10));
   }, [chip]);
 
   return (
@@ -153,6 +157,9 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* ------------------------------------------------------------ Boutique */}
+      <ShopTeaser />
+
       {/* ------------------------------------------------------------ Comment ça marche */}
       <section className="bg-white py-14">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
@@ -210,5 +217,86 @@ export default function HomePage() {
         </div>
       </section>
     </>
+  );
+}
+
+/** Met en avant la boutique sur l'accueil : bandeau + quelques produits (mis en avant d'abord). */
+function ShopTeaser() {
+  const shop = useShopSettings();
+  const products = useQuery(
+    async () =>
+      unwrap<Product[]>(
+        await getSupabase()
+          .from("products")
+          .select(PRODUCT_CARD)
+          .eq("is_active", true)
+          .order("is_featured", { ascending: false })
+          .order("sold_count", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(5),
+      ),
+    [],
+  );
+
+  const delivery = shop.loading
+    ? null
+    : shop.freeFrom
+      ? `Livraison offerte dès ${formatTND(shop.freeFrom)}`
+      : shop.fee > 0
+        ? `Livraison ${formatTND(shop.fee)}`
+        : "Livraison gratuite";
+
+  return (
+    <section className="mx-auto max-w-7xl px-4 pb-12 sm:px-6">
+      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#e6f4fa] via-white to-[#fdf3e7] p-6 ring-1 ring-line/70 sm:p-10">
+        <ShoppingBag className="absolute -right-8 -top-8 size-44 rotate-12 text-primary/[0.07]" aria-hidden />
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-xl">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-extrabold uppercase tracking-[0.14em] text-primary">
+              <Store className="size-3.5" /> Nouveau · Boutique Bakma
+            </span>
+            <h2 className="mt-3 text-2xl font-extrabold sm:text-[32px]">Tout pour bien accueillir votre compagnon</h2>
+            <p className="mt-2 text-body sm:text-lg">Alimentation, accessoires et soins, livrés partout en Tunisie.</p>
+            <ul className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold text-navy">
+              <li className="flex items-center gap-2">
+                <CheckCircle2 className="size-4 text-primary" /> Paiement à la livraison
+              </li>
+              {delivery && (
+                <li className="flex items-center gap-2">
+                  <Truck className="size-4 text-primary" /> {delivery}
+                </li>
+              )}
+            </ul>
+          </div>
+          <Button href="/boutique" size="lg" icon={<ShoppingBag className="size-4" />} className="self-start lg:self-auto">
+            Visiter la boutique
+          </Button>
+        </div>
+
+        {products.loading && !products.data ? (
+          <div className="relative mt-8 grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-3 lg:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <ProductCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : (
+          products.data &&
+          products.data.length > 0 && (
+            <>
+              <div className="relative mt-8 grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-3 lg:grid-cols-5">
+                {products.data.map((p) => (
+                  <ProductCard key={p.id} product={p} />
+                ))}
+              </div>
+              <div className="relative mt-6 text-center">
+                <Link href="/boutique" className="inline-flex items-center gap-1 text-sm font-bold text-primary hover:underline">
+                  Voir tous les produits <ArrowRight className="size-4" />
+                </Link>
+              </div>
+            </>
+          )
+        )}
+      </div>
+    </section>
   );
 }

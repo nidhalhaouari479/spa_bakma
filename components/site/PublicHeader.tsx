@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Bell, ChevronDown, FileText, LayoutDashboard, LogOut, MessageCircle, Search, User, UserRound } from "lucide-react";
+import { Bell, ChevronDown, FileText, LayoutDashboard, LogOut, MessageCircle, Package, Search, User, UserRound } from "lucide-react";
+import { CartButton } from "@/components/shop/ShopBits";
 import { Logo } from "@/components/Logo";
 import { Avatar, Button, cn } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
@@ -13,6 +14,7 @@ import { ROLE_LABEL } from "@/lib/labels";
 export const NAV_LINKS = [
   { href: "/", label: "Accueil" },
   { href: "/animaux", label: "Animaux" },
+  { href: "/boutique", label: "Boutique" },
   { href: "/comment-ca-marche", label: "Comment ça marche" },
   { href: "/a-propos", label: "À propos" },
 ];
@@ -67,6 +69,7 @@ function UserMenu() {
   const items = [
     { href: "/espace", label: "Mon espace", icon: LayoutDashboard },
     { href: "/espace/annonces", label: "Mes annonces", icon: FileText },
+    { href: "/espace/commandes", label: "Mes commandes", icon: Package },
     { href: "/espace/messages", label: "Messages", icon: MessageCircle },
     { href: "/espace/profil", label: "Mon profil", icon: UserRound },
   ];
@@ -175,6 +178,7 @@ export function PublicHeader() {
 
         <div className="ml-auto hidden items-center gap-3 lg:flex">
           <HeaderSearch className="w-52 xl:w-60" />
+          <CartButton />
           {loading ? (
             <span className="h-10 w-40 animate-pulse rounded-full bg-line/60" />
           ) : user ? (
@@ -201,6 +205,7 @@ export function PublicHeader() {
           >
             <Search className="size-5" />
           </button>
+          <CartButton />
           {user && <NotificationBell />}
         </div>
       </div>

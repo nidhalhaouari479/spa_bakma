@@ -661,10 +661,10 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 
 function Recap({ title, onEdit, children }: { title: string; onEdit: () => void; children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-line/80 p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="font-extrabold">{title}</h3>
-        <button type="button" onClick={onEdit} className="flex items-center gap-1 text-sm font-semibold text-primary hover:underline">
+    <div className="min-w-0 rounded-2xl border border-line/80 p-4">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h3 className="min-w-0 font-extrabold">{title}</h3>
+        <button type="button" onClick={onEdit} className="flex shrink-0 items-center gap-1 text-sm font-semibold text-primary hover:underline">
           <Pencil className="size-3.5" /> Modifier
         </button>
       </div>
@@ -675,9 +675,9 @@ function Recap({ title, onEdit, children }: { title: string; onEdit: () => void;
 
 function RecapRow({ label, value }: { label: string; value?: string | null }) {
   return (
-    <div className="grid grid-cols-[130px_1fr] gap-2 text-sm">
+    <div className="grid grid-cols-[110px_minmax(0,1fr)] gap-2 text-sm sm:grid-cols-[130px_minmax(0,1fr)]">
       <span className="text-muted">{label}</span>
-      <span className={cn("font-semibold", value ? "text-navy" : "text-muted")}>{value || "—"}</span>
+      <span className={cn("whitespace-pre-line font-semibold [overflow-wrap:anywhere]", value ? "text-navy" : "text-muted")}>{value || "—"}</span>
     </div>
   );
 }

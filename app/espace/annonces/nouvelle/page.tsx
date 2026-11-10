@@ -1,7 +1,4 @@
-"use client";
+// Espace client protégé côté client (EspaceShell) : la page n'est jamais rendue au prérendu.
+export const instant = false;
 
-import { AnimalForm } from "@/components/espace/AnimalForm";
-
-export default function NewListingPage() {
-  return <AnimalForm />;
-}
+export { default } from "./View";

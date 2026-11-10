@@ -20,6 +20,8 @@ import {
   PawPrint,
   Ruler,
   Share2,
+  ShieldCheck,
+  ShoppingBag,
   Stethoscope,
   Tag,
   UserRound,
@@ -32,12 +34,13 @@ import { AnimalCard } from "@/components/site/AnimalCard";
 import { ReportModal } from "@/components/site/ReportModal";
 import { Alert, AnimalThumb, Avatar, Badge, Button, Card, cn, EmptyState, MetaBadge, PageLoader, Tabs, useToast } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
-import { useFavoriteToggle } from "@/hooks/useFavorites";
+import { useFavoriteCount, useFavoriteToggle } from "@/hooks/useFavorites";
 import { unwrap, useQuery } from "@/hooks/useQuery";
 import { useCharacteristics } from "@/hooks/useRefData";
 import { ANIMAL_CARD, ANIMAL_FULL } from "@/lib/catalog";
 import { iconFor } from "@/lib/icons";
 import { formatAge, formatDate, formatPrice, ROLE_LABEL, SEX_LABEL, VACCINATION_STATUS } from "@/lib/labels";
+import { contactBakma } from "@/lib/contacts";
 import { errorMessage, getSupabase } from "@/lib/supabase";
 import type { Animal, CharacteristicGroup, Characteristics, Vaccination } from "@/lib/types";
 
@@ -84,16 +87,18 @@ export function AnimalDetailView() {
     }
     if (!res.data) return null;
     const animal = res.data as unknown as Animal;
-    const [vacc, cons, listings] = await Promise.all([
+    const [vacc, cons, listings, reserved] = await Promise.all([
       supabase.from("vaccinations").select("*").eq("animal_id", id).order("vaccinated_on", { ascending: false, nullsFirst: false }),
       supabase.rpc("is_animal_certified", { p_animal_id: id }),
       supabase.from("animals").select("id", { count: "exact", head: true }).eq("owner_id", animal.owner_id).eq("status", "publiee"),
+      animal.listing_type === "vente" ? supabase.rpc("is_animal_reserved", { p_animal_id: id }) : Promise.resolve({ data: false }),
     ]);
     return {
       animal,
       vaccinations: (vacc.data ?? []) as Vaccination[],
       certified: cons.data === true,
       ownerListings: listings.count ?? 0,
+      reserved: reserved.data === true,
     };
   }, [id]);
 
@@ -119,13 +124,27 @@ export function AnimalDetailView() {
     !!animal,
   );
 
-  // +1 vue, une seule fois par affichage
+  // +1 vue : une seule fois par navigateur et par 24 h (un rafraîchissement ne compte pas),
+  // jamais pour le propriétaire. La vue comptée est ajoutée tout de suite au compteur affiché.
   const viewed = useRef<string | null>(null);
+  const [ownView, setOwnView] = useState(0);
   useEffect(() => {
     if (!animal || authLoading || animal.status !== "publiee" || isOwner) return;
     if (viewed.current === animal.id) return;
     viewed.current = animal.id;
-    void getSupabase().rpc("increment_views", { p_animal_id: animal.id });
+    const key = `bakma:vue:${animal.id}`;
+    try {
+      const last = Number(localStorage.getItem(key) || 0);
+      if (Date.now() - last < 24 * 3600_000) return;
+      localStorage.setItem(key, String(Date.now()));
+    } catch {
+      /* stockage indisponible (navigation privée) : on compte quand même */
+    }
+    void getSupabase()
+      .rpc("increment_views", { p_animal_id: animal.id })
+      .then(({ error }) => {
+        if (!error) setOwnView(1);
+      });
   }, [animal, authLoading, isOwner]);
 
   if (detail.loading || (authLoading && animal && !PUBLIC_STATUSES.includes(animal.status))) return <PageLoader />;
@@ -191,9 +210,9 @@ export function AnimalDetailView() {
     }
     setContacting(true);
     try {
-      const { data, error } = await getSupabase().rpc("start_conversation", { p_other: animal!.owner_id, p_animal_id: animal!.id });
-      if (error) throw error;
-      router.push(`/espace/messages?c=${data as string}`);
+      // Pas de contact direct entre clients : la demande passe par l'équipe Bakma.
+      const convId = await contactBakma(animal!.id);
+      router.push(`/espace/messages?c=${convId}`);
     } catch (e) {
       toast(errorMessage(e), "error");
       setContacting(false);
@@ -206,30 +225,44 @@ export function AnimalDetailView() {
   }
 
   const contactDisabled = isOwner || closed;
+  // Vente : aucun contact direct avec le vendeur, l'achat passe par Bakma (paiement sécurisé).
+  const isSale = animal.listing_type === "vente";
+  const reserved = !!detail.data?.reserved;
+  const buyDisabled = isOwner || animal.status !== "publiee" || reserved;
+  const buyHref = `/espace/achats/acheter/${animal.id}`;
 
   const ownerCard = (
     <Card className="p-5">
-      <h3 className="text-base font-extrabold">Propriétaire</h3>
+      <h3 className="text-base font-extrabold">{isSale ? "Vendeur" : "Propriétaire"}</h3>
       <div className="mt-4 flex items-center gap-3">
         <Avatar src={owner?.avatar_url} name={owner?.full_name} size={52} />
         <div className="min-w-0 flex-1">
           <p className="truncate font-bold text-navy">{owner?.full_name || "Membre Bakma"}</p>
           {owner && <p className="text-xs text-muted">Membre depuis {new Date(owner.created_at).getFullYear()}</p>}
         </div>
-        <Button variant="outline" size="sm" className="border-primary text-primary lg:hidden" onClick={contact} disabled={contactDisabled} icon={<MessageCircle className="size-4" />}>
-          Contacter
-        </Button>
+        {!isSale && (
+          <Button variant="outline" size="sm" className="border-primary text-primary lg:hidden" onClick={contact} disabled={contactDisabled} icon={<MessageCircle className="size-4" />}>
+            Contacter Bakma
+          </Button>
+        )}
       </div>
-      <Button
-        variant="outline"
-        className="mt-4 hidden w-full border-primary text-primary lg:inline-flex"
-        onClick={contact}
-        loading={contacting}
-        disabled={contactDisabled}
-        icon={<MessageCircle className="size-4" />}
-      >
-        Contacter
-      </Button>
+      {isSale ? (
+        <p className="mt-4 flex gap-2 rounded-xl bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-800">
+          <ShieldCheck className="size-4 shrink-0" />
+          Vente sécurisée : Bakma gère le paiement et la remise de l&apos;animal, sans contact direct avec le vendeur.
+        </p>
+      ) : (
+        <Button
+          variant="outline"
+          className="mt-4 hidden w-full border-primary text-primary lg:inline-flex"
+          onClick={contact}
+          loading={contacting}
+          disabled={contactDisabled}
+          icon={<MessageCircle className="size-4" />}
+        >
+          Contacter Bakma
+        </Button>
+      )}
       <ul className="mt-4 divide-y divide-line/70 text-sm text-body">
         <li className="flex items-center gap-3 py-2.5">
           <MapPin className="size-4 shrink-0 text-muted" /> {owner?.city || animal.city || "Tunisie"}
@@ -257,39 +290,35 @@ export function AnimalDetailView() {
     { icon: MapPin, label: "Lieu", value: animal.city },
   ];
 
+  // Carte Google Maps intégrée (sans clé d'API) : position exacte si connue, sinon la ville.
+  const hasCoords = animal.latitude != null && animal.longitude != null;
+  const mapQuery = hasCoords ? `${animal.latitude},${animal.longitude}` : `${animal.city ? `${animal.city}, ` : ""}Tunisie`;
+  const mapZoom = hasCoords ? 14 : animal.city ? 12 : 6;
+
   const mapCard = (
     <Card className="p-5">
       <h3 className="text-base font-extrabold">Carte de localisation</h3>
-      <div className="mt-3 overflow-hidden rounded-xl border border-line">
-        {animal.latitude != null && animal.longitude != null ? (
-          <iframe
-            title={`Localisation — ${animal.city ?? ""}`}
-            className="h-44 w-full"
-            loading="lazy"
-            src={`https://www.openstreetmap.org/export/embed.html?bbox=${animal.longitude - 0.02}%2C${animal.latitude - 0.012}%2C${animal.longitude + 0.02}%2C${animal.latitude + 0.012}&layer=mapnik&marker=${animal.latitude}%2C${animal.longitude}`}
-          />
-        ) : (
-          <div className="grid h-44 place-items-center bg-[linear-gradient(135deg,#e3f3f8_25%,#f2f8fc_25%,#f2f8fc_50%,#e3f3f8_50%,#e3f3f8_75%,#f2f8fc_75%)] bg-[length:28px_28px]">
-            <span className="grid size-12 place-items-center rounded-full bg-primary text-white shadow-lg">
-              <MapPin className="size-6" />
-            </span>
-          </div>
-        )}
+      <div className="mt-3 overflow-hidden rounded-xl border border-line bg-page">
+        <iframe
+          title={`Localisation — ${animal.city ?? "Tunisie"}`}
+          className="block h-56 w-full"
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+          allowFullScreen
+          src={`https://maps.google.com/maps?q=${encodeURIComponent(mapQuery)}&z=${mapZoom}&hl=fr&output=embed`}
+        />
       </div>
       <p className="mt-3 flex items-center gap-2 text-sm text-body">
         <MapPin className="size-4 text-muted" /> {animal.city ? `${animal.city}, Tunisie` : "Tunisie"}
       </p>
-      <Button
-        variant="outline"
-        className="mt-3 w-full border-primary text-primary"
-        href={
-          animal.latitude != null && animal.longitude != null
-            ? `https://www.openstreetmap.org/?mlat=${animal.latitude}&mlon=${animal.longitude}#map=14/${animal.latitude}/${animal.longitude}`
-            : `https://www.openstreetmap.org/search?query=${encodeURIComponent(`${animal.city ?? ""} Tunisie`)}`
-        }
+      <a
+        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-[var(--radius-btn)] border border-primary bg-white text-sm font-semibold text-primary transition hover:bg-primary-soft"
       >
-        Voir sur la carte
-      </Button>
+        <MapPin className="size-4" /> Ouvrir dans Google Maps
+      </a>
     </Card>
   );
 
@@ -351,7 +380,7 @@ export function AnimalDetailView() {
       )}
 
       {/* ------------------------------------------------------------ Haut de page */}
-      <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_270px]">
+      <div className="mt-5 grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_270px]">
         {/* Galerie */}
         <div>
           <div className="relative overflow-hidden rounded-[22px] bg-white shadow-[0_10px_40px_rgba(15,40,90,0.08)]">
@@ -429,16 +458,19 @@ export function AnimalDetailView() {
               <PawPrint className="size-4" />
               {animal.listing_type === "adoption" ? "À adopter" : "À vendre"}
             </span>
-            <div className="hidden items-center gap-2 lg:flex">
-              <button onClick={share} className="flex items-center gap-2 text-sm font-semibold text-navy hover:text-primary">
-                <Share2 className="size-4 text-primary" /> Partager
-              </button>
-              <button onClick={share} className="grid size-10 place-items-center rounded-full border border-line bg-white text-navy" aria-label="Partager">
-                <Share2 className="size-4" />
-              </button>
+            <div className="flex items-center gap-3">
+              <LikesPill animalId={animal.id} count={animal.favorites_count} />
+              <div className="hidden items-center gap-2 lg:flex">
+                <button onClick={share} className="flex items-center gap-2 text-sm font-semibold text-navy hover:text-primary">
+                  <Share2 className="size-4 text-primary" /> Partager
+                </button>
+                <button onClick={share} className="grid size-10 place-items-center rounded-full border border-line bg-white text-navy" aria-label="Partager">
+                  <Share2 className="size-4" />
+                </button>
+              </div>
             </div>
           </div>
-          <h1 className="mt-3 text-3xl font-extrabold tracking-tight sm:text-[2.4rem]">{animal.name}</h1>
+          <h1 className="mt-3 text-3xl font-extrabold tracking-tight [overflow-wrap:anywhere] sm:text-[2.4rem]">{animal.name}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-base text-body sm:text-lg">
             {animal.sex && (
               <span className="flex items-center gap-1.5">
@@ -462,7 +494,7 @@ export function AnimalDetailView() {
 
           {animal.short_description && (
             <div className="mt-3">
-              <p className={cn("leading-relaxed text-body", !expanded && "line-clamp-3 sm:line-clamp-none")}>{animal.short_description}</p>
+              <p className={cn("leading-relaxed text-body [overflow-wrap:anywhere]", !expanded && "line-clamp-3 sm:line-clamp-none")}>{animal.short_description}</p>
               <button onClick={() => setExpanded((e) => !e)} className="mt-1 flex items-center gap-1 font-bold text-primary sm:hidden">
                 {expanded ? "Voir moins" : "Voir plus"} <ArrowRight className="size-4" />
               </button>
@@ -490,16 +522,35 @@ export function AnimalDetailView() {
           )}
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-            <Button size="lg" className="flex-1" onClick={contact} loading={contacting} disabled={contactDisabled} icon={<MessageCircle className="size-5" />}>
-              {isOwner ? "C'est votre annonce" : "Contacter le propriétaire"}
-            </Button>
+            {isSale ? (
+              buyDisabled ? (
+                <Button size="lg" className="sm:flex-1" disabled icon={<ShoppingBag className="size-5" />}>
+                  {closed ? "Vendu" : isOwner ? "C'est votre annonce" : reserved ? "Réservé — paiement en vérification" : "Indisponible"}
+                </Button>
+              ) : (
+                <Button size="lg" className="sm:flex-1" href={buyHref} icon={<ShoppingBag className="size-5" />}>
+                  Acheter — {formatPrice(animal.price, animal.listing_type)}
+                </Button>
+              )
+            ) : (
+              <Button size="lg" className="sm:flex-1" onClick={contact} loading={contacting} disabled={contactDisabled} icon={<MessageCircle className="size-5" />}>
+                {isOwner ? "C'est votre annonce" : "Contacter Bakma pour l'adopter"}
+              </Button>
+            )}
             <Button size="lg" variant="outline" onClick={() => toggle(animal.id)} icon={<Heart className={cn("size-5", fav && "fill-rose-500 text-rose-500")} />}>
               {fav ? "Dans vos favoris" : "Ajouter aux favoris"}
             </Button>
           </div>
+          {isSale && !isOwner && !closed && (
+            <p className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-body">
+              <ShieldCheck className="size-4 shrink-0 text-emerald-600" />
+              Paiement sécurisé par virement à Bakma : le vendeur n&apos;est payé qu&apos;après une garantie de 8 jours. En cas de problème, vous êtes
+              remboursé.
+            </p>
+          )}
           <div className="mt-3 flex items-center justify-between text-xs text-muted">
             <span className="flex items-center gap-1.5">
-              <Eye className="size-3.5" /> {animal.views_count} vue{animal.views_count > 1 ? "s" : ""}
+              <Eye className="size-3.5" /> {animal.views_count + ownView} vue{animal.views_count + ownView > 1 ? "s" : ""}
               {animal.published_at && <> · publiée le {formatDate(animal.published_at)}</>}
             </span>
             {!isOwner && (
@@ -529,24 +580,29 @@ export function AnimalDetailView() {
             { value: "conditions", label: "Conditions d'adoption" },
           ]}
         />
-        <div className={cn("mt-6 grid gap-5", tab === "infos" ? "lg:grid-cols-[1fr_1.25fr_1fr]" : "lg:grid-cols-[2fr_1fr]")}>
+        <div
+          className={cn(
+            "mt-6 grid grid-cols-[minmax(0,1fr)] gap-5",
+            tab === "infos" ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
+          )}
+        >
           {tab === "infos" && (
             <>
               <Card className="p-5">
                 <h3 className="text-base font-extrabold">Informations générales</h3>
                 <dl className="mt-3 divide-y divide-line/70">
                   {infoRows.map(({ icon: Icon, label, value }) => (
-                    <div key={label} className="grid grid-cols-[24px_1fr_1.3fr] items-center gap-3 py-2.5 text-sm">
+                    <div key={label} className="grid grid-cols-[24px_minmax(0,1fr)_minmax(0,1.3fr)] items-center gap-3 py-2.5 text-sm">
                       <Icon className="size-4 text-muted" />
                       <dt className="text-body">{label}</dt>
-                      <dd className="font-semibold text-navy">{value || "—"}</dd>
+                      <dd className="font-semibold text-navy [overflow-wrap:anywhere]">{value || "—"}</dd>
                     </div>
                   ))}
                 </dl>
               </Card>
               <Card className="p-5">
                 <h3 className="text-base font-extrabold">Description détaillée</h3>
-                <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-body">
+                <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-body [overflow-wrap:anywhere]">
                   {animal.description || animal.short_description || "Le propriétaire n'a pas encore ajouté de description détaillée."}
                 </p>
                 {besoins.length > 0 && (
@@ -656,7 +712,7 @@ export function AnimalDetailView() {
           {tab === "conditions" && (
             <Card className="p-5">
               <h3 className="text-base font-extrabold">Conditions d&apos;adoption</h3>
-              <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-body">
+              <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-body [overflow-wrap:anywhere]">
                 {animal.adoption_conditions || "Le propriétaire n'a pas précisé de conditions particulières. Contactez-le pour en savoir plus."}
               </p>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -670,7 +726,14 @@ export function AnimalDetailView() {
                 </div>
               </div>
               <div className="mt-4">
-                <Alert tone="blue">Conseil Bakma : rencontrez l&apos;animal avant toute adoption et ne versez jamais d&apos;argent à l&apos;avance.</Alert>
+                {isSale ? (
+                  <Alert tone="blue">
+                    Achat sécurisé : payez uniquement par virement sur le compte Bakma via le bouton « Acheter ». Ne versez jamais d&apos;argent
+                    directement au vendeur.
+                  </Alert>
+                ) : (
+                  <Alert tone="blue">Conseil Bakma : rencontrez l&apos;animal avant toute adoption et ne versez jamais d&apos;argent à l&apos;avance.</Alert>
+                )}
               </div>
             </Card>
           )}
@@ -721,5 +784,22 @@ function ValueList({ values, group }: { values: string[]; group: CharacteristicG
         );
       })}
     </ul>
+  );
+}
+
+/** Nombre de « j'aime » (favoris) de l'annonce, mis à jour en direct au clic sur le cœur. */
+function LikesPill({ animalId, count }: { animalId: string; count: number | null | undefined }) {
+  const n = useFavoriteCount(animalId, count);
+  return (
+    <span
+      title={`${n} personne${n > 1 ? "s aiment" : " aime"} cette annonce`}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-bold",
+        n > 0 ? "bg-rose-50 text-rose-500" : "bg-white text-muted ring-1 ring-line",
+      )}
+    >
+      <Heart className={cn("size-4", n > 0 && "fill-current")} />
+      {n} j&apos;aime
+    </span>
   );
 }

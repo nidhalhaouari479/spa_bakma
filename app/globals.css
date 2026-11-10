@@ -29,6 +29,8 @@ body {
   background: var(--color-page);
   color: var(--color-body);
   font-family: var(--font-sans);
+  /* un mot très long (ex. « AAAA… » sans espace) passe à la ligne au lieu de déborder */
+  overflow-wrap: break-word;
 }
 
 h1, h2, h3, h4 {

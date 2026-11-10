@@ -3,16 +3,19 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { Bell, FileText, Heart, LayoutDashboard, LogOut, MessageCircle, PlusCircle, UserRound } from "lucide-react";
+import { Bell, FileText, Heart, LayoutDashboard, LogOut, MessageCircle, Package, PlusCircle, ShoppingBag, UserRound } from "lucide-react";
 import { Avatar, cn, PageLoader } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { useUnreadMessages, useUnreadNotifications } from "@/hooks/useUnread";
 import { ROLE_LABEL } from "@/lib/labels";
 
-const ITEMS = [
+/** Rubriques de l'espace client (barre latérale desktop + menu mobile du tableau de bord). */
+export const ESPACE_NAV = [
   { href: "/espace", label: "Tableau de bord", icon: LayoutDashboard, exact: true },
   { href: "/espace/annonces", label: "Mes annonces", icon: FileText },
   { href: "/espace/annonces/nouvelle", label: "Publier un animal", icon: PlusCircle, exact: true },
+  { href: "/espace/achats", label: "Achats & ventes", icon: ShoppingBag },
+  { href: "/espace/commandes", label: "Mes commandes", icon: Package },
   { href: "/espace/favoris", label: "Mes favoris", icon: Heart },
   { href: "/espace/messages", label: "Messages", icon: MessageCircle, badge: "messages" as const },
   { href: "/espace/notifications", label: "Notifications", icon: Bell, badge: "notifications" as const },
@@ -57,7 +60,7 @@ export function EspaceShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <nav className="rounded-[var(--radius-card)] bg-white p-2.5 shadow-[0_4px_24px_rgba(15,40,90,0.06)]" aria-label="Espace client">
-            {ITEMS.map(({ href, label, icon: Icon, exact, badge }) => {
+            {ESPACE_NAV.map(({ href, label, icon: Icon, exact, badge }) => {
               const active = isActive(pathname, href, exact);
               const count = badge ? badges[badge] : 0;
               return (

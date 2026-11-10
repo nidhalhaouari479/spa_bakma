@@ -67,7 +67,15 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
     [ids, userId],
   );
 
-  const value = useMemo<FavoritesState>(() => ({ ids, ready: !!userId && loadedFor === userId, isFavorite: (id) => ids.has(id), toggle }), [ids, toggle, userId, loadedFor]);
+  const value = useMemo<FavoritesState>(
+    () => ({
+      ids,
+      ready: !!userId && loadedFor === userId,
+      isFavorite: (id) => ids.has(id),
+      toggle,
+    }),
+    [ids, toggle, userId, loadedFor],
+  );
   return <FavoritesContext.Provider value={value}>{children}</FavoritesContext.Provider>;
 }
 
@@ -97,4 +105,21 @@ export function useFavoriteToggle() {
   );
 
   return { isFavorite: ctx.isFavorite, toggle, count: ctx.ids.size, ready: ctx.ready };
+}
+
+/**
+ * Nombre de favoris d'un animal à afficher : compteur serveur (animals.favorites_count),
+ * corrigé en direct quand l'utilisateur ajoute / retire ce favori depuis la page.
+ */
+export function useFavoriteCount(animalId: string, serverCount: number | null | undefined) {
+  const ctx = useContext(FavoritesContext);
+  const fav = !!ctx?.isFavorite(animalId);
+  const ready = !!ctx?.ready;
+  const server = serverCount ?? 0;
+  // état « favori » au moment où le compteur serveur a été lu (capturé une fois les favoris chargés)
+  const [base, setBase] = useState<{ server: number; fav: boolean | null }>({ server, fav: ready ? fav : null });
+  if (base.server !== server) setBase({ server, fav: ready ? fav : null });
+  else if (base.fav === null && ready) setBase({ server, fav });
+  if (base.fav === null || base.server !== server) return server;
+  return Math.max(0, server + (fav ? 1 : 0) - (base.fav ? 1 : 0));
 }

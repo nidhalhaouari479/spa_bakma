@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CircleHelp, House, LayoutDashboard, MessageCircle, PawPrint, PlusCircle, User } from "lucide-react";
+import { CircleHelp, House, LayoutDashboard, MessageCircle, PawPrint, Store, User } from "lucide-react";
 import { cn } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { useUnreadMessages } from "@/hooks/useUnread";
@@ -14,13 +14,23 @@ export function MobileTabBar() {
   const pathname = usePathname() || "/";
   const { loading, user } = useAuth();
   const unread = useUnreadMessages(user?.id);
+  return <TabBarNav pathname={pathname} loggedIn={!!user} loading={loading} unread={unread} />;
+}
 
-  const publish: Tab = { href: "/espace/annonces/nouvelle", label: "Publier", icon: PlusCircle, active: (p) => p === "/espace/annonces/nouvelle" };
+/** Version statique (prérendu) : mêmes dimensions, aucun onglet actif, en attendant l'URL et la session. */
+export function MobileTabBarFallback() {
+  return <TabBarNav pathname="" loggedIn={false} loading unread={0} />;
+}
+
+function TabBarNav({ pathname, loggedIn, loading, unread }: { pathname: string; loggedIn: boolean; loading: boolean; unread: number }) {
+
+  // « Boutique » remplace « Publier » (publier reste accessible depuis Mon espace).
+  const shop: Tab = { href: "/boutique", label: "Boutique", icon: Store, active: (p) => p.startsWith("/boutique") || p === "/panier" || p === "/commande" };
   const animals: Tab = { href: "/animaux", label: "Animaux", icon: PawPrint, active: (p) => p.startsWith("/animaux") };
   const home: Tab = { href: "/", label: "Accueil", icon: House, active: (p) => p === "/", center: true };
-  const tabs: Tab[] = user
+  const tabs: Tab[] = loggedIn
     ? [
-        publish,
+        shop,
         animals,
         home,
         { href: "/espace/messages", label: "Messages", icon: MessageCircle, active: (p) => p.startsWith("/espace/messages"), badge: unread },
@@ -28,11 +38,11 @@ export function MobileTabBar() {
           href: "/espace",
           label: "Mon espace",
           icon: LayoutDashboard,
-          active: (p) => p.startsWith("/espace") && !p.startsWith("/espace/messages") && p !== "/espace/annonces/nouvelle",
+          active: (p) => p.startsWith("/espace") && !p.startsWith("/espace/messages"),
         },
       ]
     : [
-        publish,
+        shop,
         animals,
         home,
         { href: "/comment-ca-marche", label: "Infos", icon: CircleHelp, active: (p) => p === "/comment-ca-marche" || p === "/a-propos" },

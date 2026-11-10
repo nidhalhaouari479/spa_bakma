@@ -27,6 +27,7 @@ const SOCIALS = [
 const USEFUL = [
   { href: "/", label: "Accueil" },
   { href: "/animaux", label: "Animaux" },
+  { href: "/boutique", label: "Boutique" },
   { href: "/comment-ca-marche", label: "Comment ça marche" },
   { href: "/a-propos", label: "À propos" },
 ];

@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { Footer } from "@/components/site/Footer";
-import { MobileTabBar } from "@/components/site/MobileTabBar";
+import { MobileTabBar, MobileTabBarFallback } from "@/components/site/MobileTabBar";
 import { HeaderFallback, PublicHeader } from "@/components/site/PublicHeader";
 import { PageLoader } from "@/components/ui";
 
@@ -14,7 +14,9 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
         <Suspense fallback={<PageLoader />}>{children}</Suspense>
       </main>
       <Footer />
-      <MobileTabBar />
+      <Suspense fallback={<MobileTabBarFallback />}>
+        <MobileTabBar />
+      </Suspense>
     </div>
   );
 }

@@ -1,6 +1,9 @@
 import type { AgeUnit } from "./types";
 
 /** Sélections PostgREST (FK toujours nommées). */
+/** Statuts visibles dans les listes publiques : disponibles + vendus (affichés « Vendu »). */
+export const VISIBLE_STATUSES = ["publiee", "vendue"] as const;
+
 export const ANIMAL_CARD = "*, category:categories!animals_category_id_fkey(*)";
 export const ANIMAL_FULL =
   "*, category:categories!animals_category_id_fkey(*), owner:profiles!animals_owner_id_fkey(*), photos:animal_photos!animal_photos_animal_id_fkey(*)";

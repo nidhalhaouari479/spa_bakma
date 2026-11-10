@@ -5,6 +5,8 @@ import type {
   ConsultationStatus,
   ExamResult,
   ListingType,
+  OrderStatus,
+  PurchaseStatus,
   ReportStatus,
   RequestStatus,
   RequestStep,
@@ -75,6 +77,23 @@ export const REPORT_STATUS: Record<ReportStatus, Meta> = {
   resolu: { label: "Résolu", tone: "green" },
   rejete: { label: "Rejeté", tone: "grey" },
 };
+
+export const PURCHASE_STATUS: Record<PurchaseStatus, Meta> = {
+  paiement_a_verifier: { label: "Paiement en vérification", tone: "orange" },
+  paiement_refuse: { label: "Paiement refusé", tone: "red" },
+  annulee: { label: "Annulé", tone: "grey" },
+  garantie: { label: "Garantie en cours", tone: "blue" },
+  litige: { label: "Litige", tone: "red" },
+  versee: { label: "Versé au vendeur", tone: "green" },
+  remboursee: { label: "Remboursé", tone: "purple" },
+};
+
+/** RIB tunisien : 20 chiffres, affiché par groupes (banque · agence · compte · clé). */
+export function formatRib(rib: string | null | undefined): string {
+  const d = (rib ?? "").replace(/\D/g, "");
+  if (d.length !== 20) return rib ?? "";
+  return `${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5, 18)} ${d.slice(18)}`;
+}
 
 export const LISTING_TYPE: Record<ListingType, Meta> = {
   adoption: { label: "À adopter", tone: "orange" },
@@ -153,3 +172,25 @@ export function initials(name: string | null | undefined): string {
     .map((p) => p[0]!.toUpperCase())
     .join("");
 }
+
+// ------------------------------------------------------------------ Boutique
+/** Montant en dinars : « 1 200 TND » (« 12,50 TND » si décimales). */
+export function formatTND(n: number | null | undefined): string {
+  return `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(Number(n ?? 0))} TND`;
+}
+
+export const ORDER_STATUS: Record<OrderStatus, Meta> = {
+  nouvelle: { label: "En attente de confirmation", tone: "orange" },
+  confirmee: { label: "Confirmée", tone: "blue" },
+  expediee: { label: "En cours de livraison", tone: "purple" },
+  livree: { label: "Livrée", tone: "green" },
+  annulee: { label: "Annulée", tone: "grey" },
+};
+
+/** Étapes affichées au client (hors annulation). */
+export const ORDER_STEPS: { key: OrderStatus; label: string }[] = [
+  { key: "nouvelle", label: "Reçue" },
+  { key: "confirmee", label: "Confirmée" },
+  { key: "expediee", label: "En livraison" },
+  { key: "livree", label: "Livrée" },
+];
